@@ -1,0 +1,188 @@
+#!/bin/bash
+
+#SBATCH --mail-type=ALL
+#SBATCH -p compute
+#SBATCH -t 12:00:00
+#SBATCH --job-name=prep_na_monitor
+#SBATCH -o prep_na_monitor-%j.out
+#SBATCH -e prep_na_monitor-%j.out
+#SBATCH --mem 16G
+
+# ============================================================
+# prep_na_monitor.bsub
+# Preprocessing pipeline for the North Atlantic physical monitor.
+#
+# For a given model and year range:
+#   Step 1 - Rename grid_V dims        (rename_v5_dims_arg.py)
+#   Step 2 - Compute MOC               (CDFTOOLS cdfmoc)
+#   Step 3 - Compute AMOC timeseries   (get_AMOC_deep_v5.py)
+#   Step 4 - Regrid MLD + SOS maps     (prep_na_monitor.py --skip-amoc)
+#
+# Submit:
+#   sbatch prep_na_monitor.bsub --model TOM12_TJ_HA00 --year-start 1920 --year-end 1925
+#
+# Or with optional overrides:
+#   sbatch prep_na_monitor.bsub --model TOM12_TJ_HA00 \
+#       --year-start 1920 --year-end 1925 --month 3 \
+#       --skip-amoc   # if cdfmoc output already exists
+# ============================================================
+
+# ---- Parse args passed after sbatch script name ----
+MODEL=""
+YEAR_START=1920
+YEAR_END=1925
+MONTH=3
+SKIP_AMOC=0
+SKIP_MAPS=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --model)       MODEL="$2";      shift 2 ;;
+        --year-start)  YEAR_START="$2"; shift 2 ;;
+        --year-end)    YEAR_END="$2";   shift 2 ;;
+        --month)       MONTH="$2";      shift 2 ;;
+        --skip-amoc)   SKIP_AMOC=1;     shift ;;
+        --skip-maps)   SKIP_MAPS=1;     shift ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+done
+
+if [[ -z "$MODEL" ]]; then
+    echo "ERROR: --model is required."
+    echo "Usage: sbatch prep_na_monitor.bsub --model TOM12_TJ_HA00 [--year-start 1920] [--year-end 1925] [--month 3]"
+    exit 1
+fi
+
+SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
+CLIMS_DIR="/gpfs/data/greenocean/users/mep22dku/clims"
+NEMO5_DIR="/gpfs/data/greenocean/software/runs/NEMO5"
+CDFTOOLS_DIR="/gpfs/data/greenocean/software/resources/CDFTOOLS"
+
+echo ""
+echo "============================================================"
+echo "  prep_na_monitor: ${MODEL}"
+echo "  Years: ${YEAR_START}–${YEAR_END}  Month: ${MONTH}"
+echo "  Job ID: ${SLURM_JOB_ID}"
+echo "============================================================"
+
+# ---- Modules ----
+# gcc/netcdf needed for cdfmoc; python/anaconda for the Python steps.
+module add netcdf/4.7.4/gcc gcc/11.1.0
+module load python/anaconda/2023.07/3.11.4
+source activate ocean
+
+# ---- Step 1: Rename grid_V dims ----
+# Processes ALL available years in NEMO5_DIR/MODEL/, not just the map year range.
+if [[ $SKIP_AMOC -eq 0 ]]; then
+    echo ""
+    echo "[Step 1] Renaming grid_V dims (all available years)…"
+    python "${SCRIPT_DIR}/rename_v5_dims_arg.py" "$MODEL"
+    if [[ $? -ne 0 ]]; then
+        echo "  ERROR: rename_v5_dims_arg.py failed."
+        exit 1
+    fi
+
+    # ---- Step 2: cdfmoc on all renamed grid_V files ----
+    echo ""
+    echo "[Step 2] Computing MOC with cdfmoc (all available years)…"
+    mkdir -p "${CDFTOOLS_DIR}/MOCresults"
+    cd "${CDFTOOLS_DIR}"
+
+    MOC_DONE=0
+    MOC_SKIP=0
+    MOC_FAIL=0
+
+    # Discover every renamed grid_V file in clims (rename_v5_dims_arg puts them there).
+    # Extract the year using bash substring on the basename — avoids sed/regex issues.
+    # Filename format: ORCA2_7d_YYYYxmmdd_YYYYxmmdd_grid_V.nc
+    # "ORCA2_7d_" is 9 chars, so ${BASENAME:9:4} gives the 4-digit start year.
+    for VFILE in "${CLIMS_DIR}/${MODEL}/ORCA2_7d_"*"_grid_V.nc"; do
+        [[ -f "$VFILE" ]] || continue
+
+        BASENAME=$(basename "$VFILE")
+        YR="${BASENAME:9:4}"
+
+        # Sanity-check: must be 4 digits
+        if [[ ! "$YR" =~ ^[0-9]{4}$ ]]; then
+            echo "  WARNING: could not parse year from ${BASENAME} (got '${YR}') — skipping."
+            continue
+        fi
+
+        MOCOUT="${CDFTOOLS_DIR}/MOCresults/${MODEL}_7d_${YR}0101_${YR}1231_MOC.nc"
+        if [[ -f "$MOCOUT" ]]; then
+            MOC_SIZE=$(stat -c%s "$MOCOUT" 2>/dev/null || echo 0)
+            if [[ $MOC_SIZE -ge 5242880 ]]; then   # 5 MB minimum
+                echo "  cdfmoc: ${YR} already done ($(( MOC_SIZE / 1048576 )) MB) — skipping."
+                MOC_SKIP=$((MOC_SKIP + 1))
+                continue
+            else
+                echo "  cdfmoc: ${YR} exists but too small (${MOC_SIZE} bytes) — remaking."
+                rm -f "$MOCOUT"
+            fi
+        fi
+
+        MOC_TMP="${CDFTOOLS_DIR}/moc_${MODEL}_${YR}.nc"
+        ./bin/cdfmoc -v "$VFILE" -o "$MOC_TMP"
+        if [[ $? -eq 0 && -f "$MOC_TMP" ]]; then
+            mv "$MOC_TMP" "$MOCOUT"
+            echo "  cdfmoc: ${YR} done."
+            MOC_DONE=$((MOC_DONE + 1))
+        else
+            rm -f "$MOC_TMP"
+            echo "  cdfmoc: ${YR} FAILED."
+            MOC_FAIL=$((MOC_FAIL + 1))
+        fi
+    done
+
+    echo "  cdfmoc summary: ${MOC_DONE} new, ${MOC_SKIP} already done, ${MOC_FAIL} failed."
+    if [[ $MOC_FAIL -gt 0 ]]; then
+        echo "  ERROR: cdfmoc failed for ${MOC_FAIL} year(s). Aborting."
+        exit 1
+    fi
+
+    cd "${SCRIPT_DIR}"
+
+    # ---- Step 3: AMOC timeseries — always regenerated ----
+    # Delete stale output so get_AMOC_deep_v5 produces a clean full record.
+    echo ""
+    echo "[Step 3] Regenerating AMOC timeseries (clearing stale files first)…"
+    rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_AMOC_26N_"*.nc
+    rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_AMOC_north_"*.nc
+    rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_na_monitor_amoc_timeseries.nc"
+
+    python "${SCRIPT_DIR}/get_AMOC_deep_v5.py" "$MODEL"
+    if [[ $? -ne 0 ]]; then
+        echo "  ERROR: get_AMOC_deep_v5.py failed."
+        exit 1
+    fi
+else
+    echo ""
+    echo "[Steps 1-3] Skipped (--skip-amoc)."
+fi
+
+# ---- Step 4: Regrid MLD + SOS maps ----
+if [[ $SKIP_MAPS -eq 0 ]]; then
+    echo ""
+    echo "[Step 4] Regridding MLD + SOS maps…"
+    python "${SCRIPT_DIR}/prep_na_monitor.py" \
+        --model "$MODEL" \
+        --year-start "$YEAR_START" \
+        --year-end "$YEAR_END" \
+        --month "$MONTH" \
+        --skip-amoc
+    if [[ $? -ne 0 ]]; then
+        echo "  ERROR: prep_na_monitor.py map step failed."
+        exit 1
+    fi
+else
+    echo ""
+    echo "[Step 4] Skipped (--skip-maps)."
+fi
+
+echo ""
+echo "============================================================"
+echo "  ${MODEL} prep done."
+echo "  Plot with:"
+echo "    python ${SCRIPT_DIR}/plot_na_monitor.py --model ${MODEL} \\"
+echo "        --year-start ${YEAR_START} --year-end ${YEAR_END} --month ${MONTH}"
+echo "============================================================"

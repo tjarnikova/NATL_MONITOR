@@ -1,0 +1,391 @@
+#!/bin/bash
+
+#SBATCH --mail-type=ALL
+#SBATCH -p compute
+#SBATCH -t 12:00:00
+#SBATCH --job-name=na_monitor
+#SBATCH -o na_monitor-%j.out
+#SBATCH -e na_monitor-%j.out
+#SBATCH --mem 32G
+
+# ============================================================
+# run_monitor.bsub
+# One-button submission for the North Atlantic monitor suite.
+#
+# Submit:
+#   sbatch run_monitor.bsub --model TOM12_TJ_HA00
+#
+# ---- TOGGLE FLAGS — edit these to control what runs --------
+#
+RUN_PHYSICAL=1      # 1 = run physical monitor (MLD, SSS, AMOC)
+RUN_BGC=1           # 1 = run BGC monitor (TChl, NO3, PO4, PPINT)
+RUN_AMOC=0          # 1 = run AMOC pipeline (rename→cdfmoc→get_AMOC)
+#                   #     set to 0 if AMOC files are already up to date
+RUN_ECO=1           # 1 = run ecosystem monitor (dominant phyto/zoo, annual cycles)
+RUN_TS=1            # 1 = run regional timeseries extraction + plot
+RUN_REPORT=1        # 1 = generate HTML + PDF report
+#
+# ---- OR override via CLI args (take priority over flags above) ---
+#   --model       MODEL       (required)
+#   --month       3           month for physical maps (default March)
+#   --year-start  YYYY        physical map start year (default: auto)
+#   --year-end    YYYY        physical map end year   (default: auto)
+#   --n-years     5           years to average if start/end not given
+#   --skip-amoc               force-skip AMOC pipeline
+#   --skip-physical           force-skip physical monitor
+#   --skip-bgc                force-skip BGC monitor
+# ============================================================
+
+# ---- Defaults from toggle flags above ----
+MODEL=""
+MONTH=3
+YEAR_START=""
+YEAR_END=""
+N_YEARS=5
+SKIP_AMOC=$(( 1 - RUN_AMOC ))
+SKIP_PHYSICAL=$(( 1 - RUN_PHYSICAL ))
+SKIP_BGC=$(( 1 - RUN_BGC ))
+SKIP_ECO=$(( 1 - RUN_ECO ))
+SKIP_TS=$(( 1 - RUN_TS ))
+SKIP_REPORT=$(( 1 - RUN_REPORT ))
+TS_YEAR_START=""   # defaults to all available years
+TS_YEAR_END=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --model)          MODEL="$2";      shift 2 ;;
+        --month)          MONTH="$2";      shift 2 ;;
+        --year-start)     YEAR_START="$2"; shift 2 ;;
+        --year-end)       YEAR_END="$2";   shift 2 ;;
+        --n-years)        N_YEARS="$2";    shift 2 ;;
+        --skip-amoc)      SKIP_AMOC=1;     shift ;;
+        --skip-physical)  SKIP_PHYSICAL=1; shift ;;
+        --skip-bgc)       SKIP_BGC=1;      shift ;;
+        --skip-eco)       SKIP_ECO=1;      shift ;;
+        --skip-ts)        SKIP_TS=1;       shift ;;
+        --skip-report)    SKIP_REPORT=1;   shift ;;
+        --ts-year-start)  TS_YEAR_START="$2"; shift 2 ;;
+        --ts-year-end)    TS_YEAR_END="$2";   shift 2 ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+done
+
+if [[ -z "$MODEL" ]]; then
+    echo "ERROR: --model is required."
+    echo "Usage: sbatch run_monitor.bsub --model TOM12_TJ_HA00 [options]"
+    exit 1
+fi
+
+SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
+CLIMS_DIR="/gpfs/data/greenocean/users/mep22dku/clims"
+NEMO5_DIR="/gpfs/data/greenocean/software/runs/NEMO5"
+CDFTOOLS_DIR="/gpfs/data/greenocean/software/resources/CDFTOOLS"
+PLOTS_BASE="${SCRIPT_DIR}/plots"
+
+# Report output directory — all plots go here, HTML/PDF too
+# Computed after args parsed; year range may still be "auto" at this point
+# so we set a placeholder and update it after year detection below.
+# Report dir — placeholder until year range is known
+# Will be updated to include year range once physical years are detected.
+# If --year-start/--year-end are given explicitly, set it now.
+if [[ -n "$YEAR_START" && -n "$YEAR_END" ]]; then
+    REPORT_DIR="${PLOTS_BASE}/${MODEL}_monitor_${YEAR_START}_${YEAR_END}"
+else
+    REPORT_DIR="${PLOTS_BASE}/${MODEL}_monitor"
+fi
+mkdir -p "${REPORT_DIR}"
+
+echo ""
+echo "============================================================"
+echo "  NA Monitor suite: ${MODEL}"
+echo "  Month: ${MONTH}   N-years (BGC): ${N_YEARS}"
+echo "  Job ID: ${SLURM_JOB_ID}"
+echo "============================================================"
+
+# ---- Modules ----
+# Load gcc/netcdf first — must happen before conda activation which can
+# reset LD_LIBRARY_PATH and hide the gcc/11 libs that cdfmoc needs.
+module add gcc/11.1.0
+module add netcdf/4.7.4/gcc
+module add cdo/2.5.0
+echo "  gcc version: $(gcc --version | head -1)"
+echo "  libgfortran: $(ldconfig -p | grep libgfortran | head -3)"
+
+# Python/conda loaded here but NOT activated yet — activation happens
+# after cdfmoc so conda doesn't clobber LD_LIBRARY_PATH.
+module load python/anaconda/2023.07/3.11.4
+
+# ---- Helper: detect last N years from grid_T files ----
+detect_years() {
+    # Prints "YEAR_START YEAR_END" for the last N_YEARS of grid_T files
+    local n=$1
+    local years
+    years=$(ls "${NEMO5_DIR}/${MODEL}/ORCA2_7d_"*"0101_"*"1231_grid_T.nc" 2>/dev/null \
+        | grep -oP '(?<=_7d_)\d{4}(?=0101_)' | sort -u)
+    if [[ -z "$years" ]]; then
+        echo ""
+        return
+    fi
+    local all=($years)
+    local total=${#all[@]}
+    local start_idx=$(( total - n ))
+    [[ $start_idx -lt 0 ]] && start_idx=0
+    echo "${all[$start_idx]} ${all[$((total-1))]}"
+}
+
+# ============================================================
+# PHYSICAL MONITOR
+# ============================================================
+if [[ $SKIP_PHYSICAL -eq 0 ]]; then
+
+    echo ""
+    echo "============================================================"
+    echo "  PHYSICAL MONITOR"
+    echo "============================================================"
+
+    # Determine year range for physical maps
+    if [[ -z "$YEAR_START" || -z "$YEAR_END" ]]; then
+        YR_RANGE=$(detect_years $N_YEARS)
+        if [[ -z "$YR_RANGE" ]]; then
+            echo "  ERROR: could not detect grid_T years for ${MODEL}."
+            exit 1
+        fi
+        PHYS_YEAR_START=$(echo $YR_RANGE | awk '{print $1}')
+        PHYS_YEAR_END=$(echo $YR_RANGE | awk '{print $2}')
+        echo "  Auto-detected physical map years: ${PHYS_YEAR_START}–${PHYS_YEAR_END}"
+    else
+        PHYS_YEAR_START=$YEAR_START
+        PHYS_YEAR_END=$YEAR_END
+    fi
+
+    # Finalise report directory now we know the year range
+    REPORT_DIR="${PLOTS_BASE}/${MODEL}_monitor_${PHYS_YEAR_START}_${PHYS_YEAR_END}"
+    mkdir -p "${REPORT_DIR}"
+    echo "  Report dir: ${REPORT_DIR}"
+
+    # ---- Steps 1-3: AMOC pipeline ----
+    if [[ $SKIP_AMOC -eq 0 ]]; then
+
+        echo ""
+        echo "[Phys 1/5] Renaming grid_V dims (all available years)…"
+        # rename_v5_dims_arg.py needs xarray — activate ocean first
+        source activate ocean
+        python "${SCRIPT_DIR}/rename_v5_dims_arg.py" "$MODEL"
+        [[ $? -ne 0 ]] && { echo "ERROR: rename_v5_dims_arg.py failed."; exit 1; }
+        # Deactivate before cdfmoc so conda doesn't clobber gcc/11 libs
+        conda deactivate
+
+        echo ""
+        echo "[Phys 2/5] Computing MOC with cdfmoc…"
+        mkdir -p "${CDFTOOLS_DIR}/MOCresults"
+        cd "${CDFTOOLS_DIR}"
+
+        MOC_DONE=0; MOC_SKIP=0; MOC_FAIL=0
+        for VFILE in "${CLIMS_DIR}/${MODEL}/ORCA2_7d_"*"_grid_V.nc"; do
+            [[ -f "$VFILE" ]] || continue
+            BASENAME=$(basename "$VFILE")
+            YR="${BASENAME:9:4}"
+            [[ ! "$YR" =~ ^[0-9]{4}$ ]] && {
+                echo "  WARNING: could not parse year from ${BASENAME} — skipping."
+                continue
+            }
+            MOCOUT="${CDFTOOLS_DIR}/MOCresults/${MODEL}_7d_${YR}0101_${YR}1231_MOC.nc"
+            if [[ -f "$MOCOUT" ]]; then
+                MOC_SIZE=$(stat -c%s "$MOCOUT" 2>/dev/null || echo 0)
+                if [[ $MOC_SIZE -ge 5242880 ]]; then
+                    echo "  cdfmoc: ${YR} already done ($(( MOC_SIZE / 1048576 )) MB) — skipping."
+                    MOC_SKIP=$((MOC_SKIP + 1))
+                    continue
+                else
+                    echo "  cdfmoc: ${YR} too small (${MOC_SIZE} B) — remaking."
+                    rm -f "$MOCOUT"
+                fi
+            fi
+            MOC_TMP="${CDFTOOLS_DIR}/moc_${MODEL}_${YR}.nc"
+            ./bin/cdfmoc -v "$VFILE" -o "$MOC_TMP"
+            if [[ $? -eq 0 && -f "$MOC_TMP" ]]; then
+                mv "$MOC_TMP" "$MOCOUT"
+                echo "  cdfmoc: ${YR} done."
+                MOC_DONE=$((MOC_DONE + 1))
+            else
+                rm -f "$MOC_TMP"
+                echo "  cdfmoc: ${YR} FAILED."
+                MOC_FAIL=$((MOC_FAIL + 1))
+            fi
+        done
+        echo "  cdfmoc: ${MOC_DONE} new, ${MOC_SKIP} skipped, ${MOC_FAIL} failed."
+        [[ $MOC_FAIL -gt 0 ]] && { echo "ERROR: cdfmoc failed. Aborting."; exit 1; }
+
+        cd "${SCRIPT_DIR}"
+
+        # Activate conda now that cdfmoc is done
+        source activate ocean
+
+        echo ""
+        echo "[Phys 3/5] Regenerating AMOC timeseries…"
+        rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_AMOC_26N_"*.nc
+        rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_AMOC_north_"*.nc
+        rm -fv "${CLIMS_DIR}/${MODEL}/${MODEL}_na_monitor_amoc_timeseries.nc"
+        python "${SCRIPT_DIR}/get_AMOC_deep_v5.py" "$MODEL"
+        [[ $? -ne 0 ]] && { echo "ERROR: get_AMOC_deep_v5.py failed."; exit 1; }
+
+    else
+        echo "[Phys 1-3/5] AMOC steps skipped (--skip-amoc)."
+        source activate ocean
+    fi
+
+    echo ""
+    echo "[Phys 4/5] Regridding physical maps (${PHYS_YEAR_START}–${PHYS_YEAR_END})…"
+    python "${SCRIPT_DIR}/prep_na_monitor.py" \
+        --model "$MODEL" \
+        --year-start "$PHYS_YEAR_START" \
+        --year-end   "$PHYS_YEAR_END" \
+        --month      "$MONTH" \
+        --skip-amoc
+    [[ $? -ne 0 ]] && { echo "ERROR: prep_na_monitor.py failed."; exit 1; }
+
+    echo ""
+    echo "[Phys 5/5] Plotting physical monitor…"
+    python "${SCRIPT_DIR}/plot_na_monitor.py" \
+        --model      "$MODEL" \
+        --year-start "$PHYS_YEAR_START" \
+        --year-end   "$PHYS_YEAR_END" \
+        --month      "$MONTH" \
+        --out-dir    "${REPORT_DIR}"
+    [[ $? -ne 0 ]] && { echo "ERROR: plot_na_monitor.py failed."; exit 1; }
+
+else
+    echo "[Physical monitor skipped]"
+fi
+
+# ============================================================
+# BGC MONITOR
+# ============================================================
+if [[ $SKIP_BGC -eq 0 ]]; then
+
+    echo ""
+    echo "============================================================"
+    echo "  BGC MONITOR"
+    echo "============================================================"
+
+    # Ensure conda is active (may already be if physical ran; harmless to re-activate)
+    source activate ocean
+
+    # For BGC, year range is passed to the Python scripts which auto-detect
+    BGC_YEAR_ARGS=""
+    if [[ -n "$YEAR_START" && -n "$YEAR_END" ]]; then
+        BGC_YEAR_ARGS="--year-start ${YEAR_START} --year-end ${YEAR_END}"
+    else
+        BGC_YEAR_ARGS="--n-years ${N_YEARS}"
+    fi
+
+    echo ""
+    echo "[BGC 1/2] Regridding BGC maps…"
+    python "${SCRIPT_DIR}/prep_bgc_monitor.py" \
+        --model  "$MODEL" \
+        $BGC_YEAR_ARGS
+    [[ $? -ne 0 ]] && { echo "ERROR: prep_bgc_monitor.py failed."; exit 1; }
+
+    echo ""
+    echo "[BGC 2/2] Plotting BGC monitor…"
+    python "${SCRIPT_DIR}/plot_bgc_monitor.py" \
+        --model  "$MODEL" \
+        --out-dir "${REPORT_DIR}" \
+        $BGC_YEAR_ARGS
+    [[ $? -ne 0 ]] && { echo "ERROR: plot_bgc_monitor.py failed."; exit 1; }
+
+else
+    echo "[BGC monitor skipped]"
+fi
+
+# ============================================================
+# ECOSYSTEM MONITOR
+# ============================================================
+if [[ $SKIP_ECO -eq 0 ]]; then
+
+    echo ""
+    echo "============================================================"
+    echo "  ECOSYSTEM MONITOR"
+    echo "============================================================"
+
+    # Ensure conda is active
+    source activate ocean
+
+    echo ""
+    echo "[Eco 1/2] Building climatology, depth-integrating, computing dominants…"
+    python "${SCRIPT_DIR}/prep_eco_monitor.py"         --model  "$MODEL"         --n-years "${N_YEARS}"
+    [[ $? -ne 0 ]] && { echo "ERROR: prep_eco_monitor.py failed."; exit 1; }
+
+    echo ""
+    echo "[Eco 2/2] Plotting ecosystem monitor…"
+    python "${SCRIPT_DIR}/plot_eco_monitor.py" \
+        --model  "$MODEL" \
+        --out-dir "${REPORT_DIR}"
+    [[ $? -ne 0 ]] && { echo "ERROR: plot_eco_monitor.py failed."; exit 1; }
+
+else
+    echo "[Ecosystem monitor skipped]"
+fi
+
+# ============================================================
+# REGIONAL TIMESERIES
+# ============================================================
+if [[ $SKIP_TS -eq 0 ]]; then
+
+    echo ""
+    echo "============================================================"
+    echo "  REGIONAL TIMESERIES"
+    echo "============================================================"
+
+    source activate ocean
+
+    echo ""
+    echo "[TS 1/2] Extracting regional timeseries…"
+    python "${SCRIPT_DIR}/prep_region_timeseries.py" \
+        --model "$MODEL" \
+        ${TS_YEAR_START:+--year-start "$TS_YEAR_START"} \
+        ${TS_YEAR_END:+--year-end "$TS_YEAR_END"}
+    [[ $? -ne 0 ]] && { echo "ERROR: prep_region_timeseries.py failed."; exit 1; }
+
+    echo ""
+    echo "[TS 2/2] Plotting timeseries…"
+    python "${SCRIPT_DIR}/plot_region_timeseries.py" \
+        --model "$MODEL" \
+        --out-dir "${REPORT_DIR}" \
+        ${TS_YEAR_START:+--year-start "$TS_YEAR_START"} \
+        ${TS_YEAR_END:+--year-end "$TS_YEAR_END"}
+    [[ $? -ne 0 ]] && { echo "ERROR: plot_region_timeseries.py failed."; exit 1; }
+
+else
+    echo "[Regional timeseries skipped]"
+fi
+
+# ============================================================
+# HTML + PDF REPORT
+# ============================================================
+if [[ $SKIP_REPORT -eq 0 ]]; then
+
+    echo ""
+    echo "============================================================"
+    echo "  REPORT"
+    echo "============================================================"
+
+    source activate ocean
+
+    python "${SCRIPT_DIR}/make_report.py" \
+        --model "$MODEL" \
+        --plots-dir "${REPORT_DIR}" \
+        --out-dir   "${REPORT_DIR}" \
+        ${YEAR_START:+--year-start "$YEAR_START"} \
+        ${YEAR_END:+--year-end "$YEAR_END"}
+    [[ $? -ne 0 ]] && { echo "ERROR: make_report.py failed."; exit 1; }
+
+else
+    echo "[Report skipped]"
+fi
+
+echo ""
+echo "============================================================"
+echo "  Monitor suite complete for ${MODEL}."
+echo "  Plots in: ${SLURM_SUBMIT_DIR}/plots/"
+echo "============================================================"

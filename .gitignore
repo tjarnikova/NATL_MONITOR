@@ -1,0 +1,8 @@
+plots/
+*.nc
+*.png
+*.pdf
+*.html
+__pycache__/
+*.pyc
+na_monitor-*.out
