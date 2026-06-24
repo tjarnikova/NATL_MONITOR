@@ -44,11 +44,11 @@ OBS_NO3_FILE       = OBS_BGC_DIR / "bgc_obs_no3_r360x180.nc"
 OBS_PO4_FILE       = OBS_BGC_DIR / "bgc_obs_po4_r360x180.nc"
 
 OUT_DIR_DEFAULT = Path(
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plots"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plots"
 )
 
 SCRIPT_PATH = (
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plot_bgc_monitor.py"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plot_bgc_monitor.py"
 )
 
 # ---------------------------------------------------------------------------

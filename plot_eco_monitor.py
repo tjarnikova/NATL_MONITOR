@@ -38,10 +38,10 @@ from plot_style import set_presentation_style
 CLIMS_DIR   = Path("/gpfs/data/greenocean/users/mep22dku/clims")
 NEMO5_DIR   = Path("/gpfs/data/greenocean/software/runs/NEMO5")
 OUT_DIR_DEFAULT = Path(
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plots"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plots"
 )
 SCRIPT_PATH = (
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plot_eco_monitor.py"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plot_eco_monitor.py"
 )
 
 # ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ from pathlib import Path
 # Paths
 # ---------------------------------------------------------------------------
 OUT_DIR_DEFAULT = Path(
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plots"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plots"
 )
 
 

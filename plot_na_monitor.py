@@ -59,11 +59,11 @@ OBS_SAL_PATTERN      = "woa23_5564_s{month:02d}_01.nc"
 CLIMS_DIR = Path("/gpfs/data/greenocean/users/mep22dku/clims")
 
 OUT_DIR_DEFAULT = Path(
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plots"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plots"
 )
 
 # Script path for provenance
-SCRIPT_PATH = "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plot_na_monitor.py"
+SCRIPT_PATH = "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plot_na_monitor.py"
 
 # ---------------------------------------------------------------------------
 # Colour limits — settable here or overridden on the command line

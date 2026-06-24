@@ -37,10 +37,10 @@ from plot_style import set_presentation_style
 # ---------------------------------------------------------------------------
 CLIMS_DIR = Path("/gpfs/data/greenocean/users/mep22dku/clims")
 OUT_DIR_DEFAULT = Path(
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/plots"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/plots"
 )
 SCRIPT_PATH = (
-    "/gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/"
+    "/gpfs/home/mep22dku/scratch/NATL_MONITOR/"
     "plot_region_timeseries.py"
 )
 
@@ -185,15 +185,16 @@ def add_stacked_legend(ax, phyto_vars, phyto_colors, zoo_vars, zoo_colors):
                                      edgecolor="#555555", lw=0.5, label=v)
                      for v in zoo_vars if v in zoo_colors]
 
+    # Pin both legends to the same x anchor so titles align
     legend1 = ax.legend(handles=phyto_patches, title="Phytoplankton",
-                         loc="upper left",
-                         fontsize=9, title_fontsize=9.5,
+                         loc="upper left", bbox_to_anchor=(0.0, 1.0),
+                         fontsize=11, title_fontsize=11.5,
                          framealpha=0.0, edgecolor="none",
                          ncol=2, columnspacing=0.8, handlelength=1.2)
     ax.add_artist(legend1)
     ax.legend(handles=zoo_patches, title="Zooplankton / Heterotrophs",
-              loc="lower left",
-              fontsize=9, title_fontsize=9.5,
+              loc="lower left", bbox_to_anchor=(0.0, 0.0),
+              fontsize=11, title_fontsize=11.5,
               framealpha=0.0, edgecolor="none",
               ncol=2, columnspacing=0.8, handlelength=1.2)
 
@@ -236,12 +237,12 @@ def plot_physical(data: dict, model: str, year_start: int, year_end: int,
 
     panels = [
         # (row, col, varname, ylabel, color)
-        (0, 0, "tos",      "SST (°C)",         "#0050FF"),
+        (0, 0, "tos",      "SST (deg C)",         "#0050FF"),
         (1, 0, "sos",      "SSS (psu)",         "#1A1A1A"),
         (2, 0, "mldr10_1", "MLD (m)",           "#DE2E25"),
-        (0, 1, "NO3",      "NO3 (mol C L⁻¹)",  "#4477AA"),
-        (1, 1, "PO4",      "PO4 (mol C L⁻¹)",  "#228833"),
-        (2, 1, "Si",       "Si (mol C L⁻¹)",   "#CCBB44"),
+        (0, 1, "NO3",      "NO3 (mol C / L)",  "#4477AA"),
+        (1, 1, "PO4",      "PO4 (mol C / L)",  "#228833"),
+        (2, 1, "Si",       "Si (mol C / L)",   "#CCBB44"),
     ]
 
     for row, col, v, ylabel, color in panels:
@@ -282,8 +283,8 @@ def plot_bgc(data: dict, model: str, year_start: int, year_end: int,
 
     # Col 0: scalar BGC panels
     scalar_panels = [
-        (0, 0, "TChl",  "TChl (mg m⁻³)",         "#228833"),
-        (1, 0, "Cflx",  "CO₂ flux (model units)", "#0050FF"),
+        (0, 0, "TChl",  "TChl (mg / m3)",         "#228833"),
+        (1, 0, "Cflx",  "CO2 flux (model units)", "#0050FF"),
         (2, 0, "PPINT", "PP int (model units)",   "#DE2E25"),
     ]
     for row, col, v, ylabel, color in scalar_panels:
@@ -299,14 +300,14 @@ def plot_bgc(data: dict, model: str, year_start: int, year_end: int,
     # Col 1 row 0: phyto stacked
     stacked_panel(
         axes[0, 1], data, PHYTO_VARS, PHYTO_COLORS,
-        "Phyto biomass (mmol m⁻²)",
+        "Phyto biomass (mmol / m2)",
     )
     axes[0, 1].set_title("Phytoplankton", fontsize=font_size - 1)
 
     # Col 1 row 1: zoo stacked
     stacked_panel(
         axes[1, 1], data, ZOO_VARS, ZOO_COLORS,
-        "Zoo biomass (mmol m⁻²)",
+        "Zoo biomass (mmol / m2)",
     )
     axes[1, 1].set_title("Zooplankton / Heterotrophs", fontsize=font_size - 1)
 
