@@ -10,9 +10,7 @@ Outputs go to `MONITOR/plots/`. Preprocessed model fields go to
 
 ## Example output
 
-**v0.1 monitor** (TOM12_TJ_HA00, 1995–2000):
-https://tjarnikova.github.io/sklad/TOM12_TJ_HA00_monitor_1995_2000/TOM12_TJ_HA00_monitor_1995_2000.html
-
+[v0.1 monitor (TOM12_TJ_HA00, 1995–2000)](https://tjarnikova.github.io/sklad/TOM12_TJ_HA00_monitor_1995_2000/TOM12_TJ_HA00_monitor_1995_2000.html)
 
 ---
 
