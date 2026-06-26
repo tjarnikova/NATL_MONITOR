@@ -1,12 +1,18 @@
 # NA Monitor Suite
 
 Scripts for generating physical and biogeochemical diagnostic monitors for
-PlankTOM/NEMO5 runs. All scripts live in:
+PlankTOM/NEMO5 runs, focusing on the Subpolar Gyre region. All scripts live in:
 
     /gpfs/home/mep22dku/scratch/AMOC-PLANKTOM/hosing/AMOCtun/MONITOR/
 
 Outputs go to `MONITOR/plots/`. Preprocessed model fields go to
 `/gpfs/data/greenocean/users/mep22dku/clims/<MODEL>/`.
+
+## Example output
+
+**v0.1 monitor** (TOM12_TJ_HA00, 1995–2000):
+https://tjarnikova.github.io/sklad/TOM12_TJ_HA00_monitor_1995_2000/TOM12_TJ_HA00_monitor_1995_2000.html
+
 
 ---
 
@@ -257,4 +263,34 @@ sbatch run_monitor.bsub --model TOM12_TJ_NEWMODEL --skip-amoc
 ## Planned additions
 
 - **Ecosystem monitor** — zooplankton, export, food web diagnostics
+- Quantitative model performance metrics
 - Multi-model comparison mode
+
+
+
+
+---
+
+## License
+
+MIT License
+
+Copyright (c) 2026 tjarnikova
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
