@@ -83,13 +83,13 @@ def load_annual_means(ts_dir: Path, model: str,
             if not (year_start <= year <= year_end):
                 continue
             try:
-                ds = xr.open_dataset(fpath)   # datetime64 time axis — opens cleanly
-                for v in ds.data_vars:
-                    val = float(ds[v].mean().values)
-                    if v not in data:
-                        data[v] = []
-                    data[v].append((year, val))
-                ds.close()
+                # Load and immediately close — avoids accumulating open file handles
+                with xr.open_dataset(fpath) as ds:
+                    for v in ds.data_vars:
+                        val = float(ds[v].mean().load().values)
+                        if v not in data:
+                            data[v] = []
+                        data[v].append((year, val))
             except Exception as e:
                 print(f"  WARNING: could not load {Path(fpath).name}: {e}")
 

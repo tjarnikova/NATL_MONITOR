@@ -2,11 +2,11 @@
 
 #SBATCH --mail-type=ALL
 #SBATCH -p compute
-#SBATCH -t 12:00:00
+#SBATCH -t 24:00:00
 #SBATCH --job-name=na_monitor
 #SBATCH -o na_monitor-%j.out
 #SBATCH -e na_monitor-%j.out
-#SBATCH --mem 32G
+#SBATCH --mem 480G
 
 # ============================================================
 # run_monitor.bsub
@@ -19,7 +19,7 @@
 #
 RUN_PHYSICAL=1      # 1 = run physical monitor (MLD, SSS, AMOC)
 RUN_BGC=1           # 1 = run BGC monitor (TChl, NO3, PO4, PPINT)
-RUN_AMOC=0          # 1 = run AMOC pipeline (rename→cdfmoc→get_AMOC)
+RUN_AMOC=1          # 1 = run AMOC pipeline (rename→cdfmoc→get_AMOC)
 #                   #     set to 0 if AMOC files are already up to date
 RUN_ECO=1           # 1 = run ecosystem monitor (dominant phyto/zoo, annual cycles)
 RUN_TS=1            # 1 = run regional timeseries extraction + plot
@@ -103,6 +103,8 @@ echo "  Job ID: ${SLURM_JOB_ID}"
 echo "============================================================"
 
 # ---- Modules ----
+# Purge first to avoid version conflicts (e.g. gcc being downgraded)
+module purge
 # Load gcc/netcdf first — must happen before conda activation which can
 # reset LD_LIBRARY_PATH and hide the gcc/11 libs that cdfmoc needs.
 module add gcc/11.1.0
